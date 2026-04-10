@@ -1,4 +1,15 @@
 # yaml-language-server: $schema=./.github/registry_schema.json
+- title: Swarm-augmented time series forecasting with MiroFish and TimesFM
+  description: Combine MiroFish-style swarm intelligence with Google TimesFM for a
+    novel forecasting approach that bridges qualitative multi-agent debate with quantitative
+    time series prediction, using Claude as the meta-synthesis layer.
+  path: third_party/MiroFish_TimesFM/swarm_augmented_forecasting.ipynb
+  authors:
+  - Anthropic
+  date: '2026-04-10'
+  categories:
+  - Integrations
+  - Agent Patterns
 - title: Giving Claude a crop tool for better image analysis
   description: Give Claude a crop tool to zoom into image regions for detailed analysis
     of charts, documents, and diagrams.
