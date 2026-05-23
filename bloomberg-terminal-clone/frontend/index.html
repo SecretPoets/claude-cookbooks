@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TERM-AI // Claude Bloomberg Terminal</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <!-- Top bar: clock, status, command line -->
+    <header id="topbar">
+      <div class="brand">
+        <span class="brand-mark">TERM-AI</span>
+        <span class="brand-sub">v1.0 // CLAUDE-POWERED</span>
+      </div>
+      <form id="cmdform" class="cmdline" autocomplete="off">
+        <span class="cmd-prompt">CMD&gt;</span>
+        <input
+          id="cmdinput"
+          type="text"
+          spellcheck="false"
+          placeholder="TYPE A TICKER (E.G. AAPL) AND PRESS ENTER, OR &quot;HELP&quot;"
+        />
+        <span class="cmd-hint">F1 HELP &nbsp; F2 CHAT &nbsp; F3 NEWS</span>
+      </form>
+      <div class="status">
+        <span class="dot dot-green"></span>
+        <span id="status-text">LIVE</span>
+        <span class="sep">|</span>
+        <span id="clock">--:--:--</span>
+      </div>
+    </header>
+
+    <!-- Scrolling ticker strip -->
+    <div id="ticker-strip"><div id="ticker-track">LOADING MARKETS…</div></div>
+
+    <!-- Main 12-col grid -->
+    <main id="grid">
+      <!-- Watchlist -->
+      <section class="panel" id="panel-watchlist">
+        <div class="panel-head">
+          <span class="panel-num">&lt;1&gt;</span>
+          <span class="panel-title">WATCHLIST</span>
+          <span class="panel-meta" id="watchlist-meta">—</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table" id="watchlist-table">
+            <thead>
+              <tr>
+                <th>SYM</th>
+                <th>NAME</th>
+                <th class="num">LAST</th>
+                <th class="num">CHG</th>
+                <th class="num">%CHG</th>
+                <th class="num">VOL</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="6" class="muted">loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Quote detail + chart -->
+      <section class="panel" id="panel-quote">
+        <div class="panel-head">
+          <span class="panel-num">&lt;2&gt;</span>
+          <span class="panel-title" id="quote-title">QUOTE</span>
+          <span class="panel-meta" id="quote-exchange">—</span>
+        </div>
+        <div class="panel-body">
+          <div id="quote-hero">
+            <div class="hero-price">
+              <div class="hero-symbol" id="quote-symbol">—</div>
+              <div class="hero-name" id="quote-name">Select a ticker</div>
+              <div class="hero-last" id="quote-last">—</div>
+              <div class="hero-chg" id="quote-chg">—</div>
+            </div>
+            <div class="hero-stats">
+              <div><span>OPEN</span><b id="q-open">—</b></div>
+              <div><span>HIGH</span><b id="q-high">—</b></div>
+              <div><span>LOW</span><b id="q-low">—</b></div>
+              <div><span>PREV</span><b id="q-prev">—</b></div>
+              <div><span>VOL</span><b id="q-vol">—</b></div>
+              <div><span>MKT CAP</span><b id="q-mcap">—</b></div>
+              <div><span>P/E</span><b id="q-pe">—</b></div>
+              <div><span>DIV YLD</span><b id="q-div">—</b></div>
+              <div><span>EPS</span><b id="q-eps">—</b></div>
+              <div><span>BETA</span><b id="q-beta">—</b></div>
+              <div><span>52W HI</span><b id="q-52h">—</b></div>
+              <div><span>52W LO</span><b id="q-52l">—</b></div>
+            </div>
+          </div>
+          <div id="chart-wrap">
+            <canvas id="chart"></canvas>
+            <div id="chart-legend" class="muted">—</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- News -->
+      <section class="panel" id="panel-news">
+        <div class="panel-head">
+          <span class="panel-num">&lt;3&gt;</span>
+          <span class="panel-title">NEWS WIRE</span>
+          <span class="panel-meta" id="news-meta">TOP</span>
+        </div>
+        <div class="panel-body" id="news-list">
+          <div class="muted">loading…</div>
+        </div>
+      </section>
+
+      <!-- Claude chat -->
+      <section class="panel" id="panel-chat">
+        <div class="panel-head">
+          <span class="panel-num">&lt;4&gt;</span>
+          <span class="panel-title">TERM-AI :: ANALYST</span>
+          <span class="panel-meta">
+            <label class="toggle">
+              <input type="checkbox" id="thinking-toggle" />
+              <span>EXT. THINKING</span>
+            </label>
+          </span>
+        </div>
+        <div class="panel-body chat-body">
+          <div id="chat-log">
+            <div class="chat-msg sys">
+              <div class="role">SYSTEM</div>
+              <div class="body">
+                TERM-AI ready. Ask about any ticker in your watchlist, request
+                a comparison, or screen by sector. Try:
+                <span class="example" data-prompt="Give me a quick read on NVDA: price action, latest news, and a BUY/HOLD/SELL call."
+                  >Quick read on NVDA</span
+                >
+                ·
+                <span
+                  class="example"
+                  data-prompt="Compare AAPL and MSFT on valuation and recent news."
+                  >AAPL vs MSFT</span
+                >
+                ·
+                <span
+                  class="example"
+                  data-prompt="What's moving the market today? Use market_overview and the top news."
+                  >Market wrap</span
+                >
+              </div>
+            </div>
+          </div>
+          <form id="chatform" class="chat-input">
+            <span class="cmd-prompt">&gt;</span>
+            <input
+              id="chatinput"
+              type="text"
+              spellcheck="false"
+              placeholder="Ask TERM-AI…"
+              autocomplete="off"
+            />
+            <button type="submit" id="chatsend">SEND</button>
+          </form>
+          <div id="usage-strip" class="usage muted">—</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer id="footer">
+      <span>MOCK DATA · NO LIVE FEED · NOT INVESTMENT ADVICE</span>
+      <span class="sep">|</span>
+      <span id="last-update">awaiting data…</span>
+      <span class="sep">|</span>
+      <span>© CLAUDE COOKBOOK</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
