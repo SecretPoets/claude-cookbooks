@@ -5,7 +5,14 @@ foundation model: feed it a sequence of numbers and it forecasts forward, with n
 training required. This file is a clean starting point you can copy into any
 project — it has no dependencies beyond timesfm, numpy, and (optionally) pandas.
 
-Install once per machine (downloads the library + model weights on first use):
+It supports BOTH released APIs, because `pip install timesfm` may give you either
+generation depending on your platform:
+  * 2.5  -> timesfm.TimesFM_2p5_200M_torch  (checkpoint google/timesfm-2.5-200m-pytorch)
+  * 1.x  -> timesfm.TimesFm                 (checkpoint google/timesfm-1.0-200m-pytorch)
+`load_model()` auto-detects which one is installed.
+
+Install once per machine (downloads the library; model weights download on first use
+and require network access to Hugging Face):
 
     uv pip install "timesfm[torch]" numpy pandas
     # or:  pip install "timesfm[torch]" numpy pandas
@@ -18,7 +25,7 @@ Use as a library:
 
 Or from the command line on a CSV (one numeric column = the history):
 
-    python timesfm_quickstart.py sales.csv --column revenue --horizon 12
+    python timesfm_quickstart.py timesfm_example.csv --column revenue --horizon 12
 """
 
 from __future__ import annotations
@@ -28,32 +35,90 @@ from collections.abc import Sequence
 
 import numpy as np
 
-# Default checkpoint: the 200M-parameter TimesFM 2.5 model with a quantile head.
-DEFAULT_CHECKPOINT = "google/timesfm-2.5-200m-pytorch"
+CHECKPOINT_2P5 = "google/timesfm-2.5-200m-pytorch"
+CHECKPOINT_1X = "google/timesfm-1.0-200m-pytorch"
 
 
-def load_model(checkpoint: str = DEFAULT_CHECKPOINT, max_horizon: int = 64):
-    """Load and compile a TimesFM model once, then reuse it for many forecasts."""
+class _Forecaster:
+    """Thin wrapper that hides the API differences between TimesFM 2.5 and 1.x."""
+
+    def __init__(self, model, api: str, max_horizon: int):
+        self._model = model
+        self._api = api  # "2.5" or "1.x"
+        self._max_horizon = max_horizon
+
+    def forecast(
+        self, history: Sequence[float], horizon: int = 12
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        series = np.asarray(history, dtype=float)
+        if series.ndim != 1 or series.size < 2:
+            raise ValueError("history must be a 1-D sequence with at least 2 points")
+        if horizon > self._max_horizon:
+            raise ValueError(f"horizon {horizon} exceeds max_horizon {self._max_horizon}")
+
+        if self._api == "2.5":
+            point, quantiles = self._model.forecast(horizon=horizon, inputs=[series])
+            point_forecast = np.asarray(point[0])[:horizon]
+            q = np.asarray(quantiles[0])
+            if q.ndim == 2 and q.shape[1] >= 2:
+                lower, upper = q[:horizon, 0], q[:horizon, -1]
+            else:
+                lower = upper = point_forecast
+        else:  # 1.x
+            point, quantiles = self._model.forecast([series], freq=[0])
+            point_forecast = np.asarray(point[0])[:horizon]
+            q = np.asarray(quantiles[0])  # shape: (horizon, num_quantiles); col 0 is the mean
+            if q.ndim == 2 and q.shape[1] >= 3:
+                lower, upper = q[:horizon, 1], q[:horizon, -1]
+            else:
+                lower = upper = point_forecast
+        return point_forecast, lower, upper
+
+
+def load_model(max_horizon: int = 64) -> _Forecaster:
+    """Load and compile a TimesFM model once, then reuse it for many forecasts.
+
+    Auto-detects the installed API generation (2.5 preferred, else 1.x).
+    """
     import timesfm
-    import torch
 
-    torch.set_float32_matmul_precision("high")
-    model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(checkpoint)
-    model.compile(
-        timesfm.ForecastConfig(
-            max_context=512,
-            max_horizon=max_horizon,
-            normalize_inputs=True,
-            use_continuous_quantile_head=True,  # gives prediction intervals
-            force_flip_invariance=True,
-            fix_quantile_crossing=True,
+    if hasattr(timesfm, "TimesFM_2p5_200M_torch"):
+        import torch
+
+        torch.set_float32_matmul_precision("high")
+        model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(CHECKPOINT_2P5)
+        model.compile(
+            timesfm.ForecastConfig(
+                max_context=512,
+                max_horizon=max_horizon,
+                normalize_inputs=True,
+                use_continuous_quantile_head=True,  # gives prediction intervals
+                force_flip_invariance=True,
+                fix_quantile_crossing=True,
+            )
         )
+        return _Forecaster(model, "2.5", max_horizon)
+
+    if hasattr(timesfm, "TimesFm"):
+        model = timesfm.TimesFm(
+            hparams=timesfm.TimesFmHparams(
+                backend="cpu",
+                per_core_batch_size=32,
+                horizon_len=max_horizon,
+                context_len=512,
+            ),
+            checkpoint=timesfm.TimesFmCheckpoint(huggingface_repo_id=CHECKPOINT_1X),
+        )
+        return _Forecaster(model, "1.x", max_horizon)
+
+    raise ImportError(
+        "Installed `timesfm` exposes neither TimesFM_2p5_200M_torch nor TimesFm. "
+        "Try: pip install --upgrade 'timesfm[torch]'"
     )
-    return model
 
 
 def forecast(
-    model,
+    model: _Forecaster,
     history: Sequence[float],
     horizon: int = 12,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -63,19 +128,7 @@ def forecast(
     The bands are the lowest/highest quantiles TimesFM produces — a rough
     prediction interval, not a guarantee.
     """
-    series = np.asarray(history, dtype=float)
-    if series.ndim != 1 or series.size < 2:
-        raise ValueError("history must be a 1-D sequence with at least 2 points")
-
-    point, quantiles = model.forecast(horizon=horizon, inputs=[series])
-    point_forecast = np.asarray(point[0])
-
-    q = np.asarray(quantiles[0])
-    if q.ndim == 2 and q.shape[1] >= 2:
-        lower, upper = q[:, 0], q[:, -1]
-    else:
-        lower = upper = point_forecast
-    return point_forecast, lower, upper
+    return model.forecast(history, horizon=horizon)
 
 
 def _load_csv_column(path: str, column: str | None) -> np.ndarray:
