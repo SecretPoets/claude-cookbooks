@@ -17,7 +17,14 @@ and require network access to Hugging Face):
     uv pip install "timesfm[torch]" numpy pandas
     # or:  pip install "timesfm[torch]" numpy pandas
 
-Use as a library:
+Use as a library — point at any data and forecast it:
+
+    from timesfm_quickstart import apply_timesfm
+    point, low, high = apply_timesfm("sales.csv", value_column="revenue", horizon=12)
+    point, low, high = apply_timesfm(my_dataframe, value_column="rent")
+    point, low, high = apply_timesfm([100, 102, 105, ...])  # a plain list/array
+
+Or manage the model yourself for repeated calls:
 
     from timesfm_quickstart import load_model, forecast
     model = load_model()
@@ -32,6 +39,9 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -131,18 +141,62 @@ def forecast(
     return model.forecast(history, horizon=horizon)
 
 
-def _load_csv_column(path: str, column: str | None) -> np.ndarray:
-    import pandas as pd
+@lru_cache(maxsize=4)
+def get_model(max_horizon: int = 64) -> _Forecaster:
+    """Cached `load_model` — repeated calls reuse the same loaded model."""
+    return load_model(max_horizon=max_horizon)
 
-    df = pd.read_csv(path)
+
+def apply_timesfm(
+    data: Any,
+    value_column: str | None = None,
+    horizon: int = 12,
+    model: _Forecaster | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Point at some data and forecast it. Accepts a CSV path, a pandas
+    DataFrame/Series, or any 1-D sequence of numbers.
+
+    For tabular inputs, `value_column` selects the series (defaults to the last
+    numeric column). The model is loaded once and cached unless you pass your own.
+
+    Returns (point_forecast, lower_band, upper_band), each of length `horizon`.
+    """
+    series = _coerce_to_series(data, value_column)
+    if model is None:
+        model = get_model(max_horizon=max(horizon, 1))
+    return forecast(model, series, horizon=horizon)
+
+
+def _pick_numeric(df, column: str | None) -> np.ndarray:
     if column is not None:
         values = df[column]
     else:
         numeric = df.select_dtypes("number")
         if numeric.shape[1] == 0:
-            raise ValueError("no numeric column found; pass --column explicitly")
+            raise ValueError("no numeric column found; pass value_column explicitly")
         values = numeric.iloc[:, -1]  # last numeric column by default
     return values.to_numpy(dtype=float)
+
+
+def _coerce_to_series(data: Any, value_column: str | None) -> np.ndarray:
+    if isinstance(data, (str, Path)):
+        import pandas as pd
+
+        return _pick_numeric(pd.read_csv(data), value_column)
+
+    # Detect pandas DataFrame/Series by attribute, without importing pandas eagerly.
+    if hasattr(data, "select_dtypes"):  # DataFrame
+        return _pick_numeric(data, value_column)
+    if hasattr(data, "to_numpy") and not isinstance(data, np.ndarray):  # Series
+        return data.to_numpy(dtype=float)
+
+    return np.asarray(data, dtype=float).ravel()
+
+
+def _load_csv_column(path: str, column: str | None) -> np.ndarray:
+    import pandas as pd
+
+    return _pick_numeric(pd.read_csv(path), column)
 
 
 def main() -> None:
